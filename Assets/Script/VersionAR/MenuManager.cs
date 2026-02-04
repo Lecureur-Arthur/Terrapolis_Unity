@@ -14,4 +14,9 @@ public class MenuManager : MonoBehaviour
     {
          Application.Quit();
     }
+
+    public void AccesPrefab3D()
+    {
+        SceneManager.LoadScene("VisualizationPrefab3D");
+    }
 }

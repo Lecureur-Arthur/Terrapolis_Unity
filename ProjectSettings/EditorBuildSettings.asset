@@ -5,12 +5,13 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 0
-    path: Assets/Scenes/Version2D/TestUdp.unity
-    guid: d9b7794855bd36241988f1bedd38aa73
   - enabled: 1
     path: Assets/Scenes/Version2D/GamePlay2D.unity
     guid: 9fc0d4010bbf28b4594072e72b8655ab
+  - enabled: 1
+    path: Assets/Scenes/VisualizationPrefab3D.unity
+    guid: 4d391c95cbede4b4ab504026a4d839d6
   m_configObjects:
     UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: e6778fbb2df73f34aafeceda53c7a322, type: 2}
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: b0ad641f3d84109429e916bb6a2705f0, type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 4ea1c83fd22ad814cb9147bf0abcb76b, type: 2}
