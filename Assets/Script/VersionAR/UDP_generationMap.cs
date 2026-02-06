@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using TMPro;
+using UnityEngine.EventSystems;
 
 public class UDP_generationMap : MonoBehaviour
 {
@@ -18,20 +19,30 @@ public class UDP_generationMap : MonoBehaviour
     [Header("UI & Etapes")]
     public TextMeshProUGUI instructionText; 
     public GameObject finalCanvas; 
+    public GameObject itemMenuPanel;
+    public GameObject validateButton;
+    public TextMeshProUGUI feedbackText;
 
-    [Header("Composants AR (À remplir dans l'inspecteur)")]
-    public ARTrackedImageManager imageManager; // <--- Nouveau : on surveille l'image ici
-    public ARRaycastManager raycastManager;
-    public ARPlaneManager planeManager;
-    public GameObject tilePrefab; 
+    [Header("Calibration Raycast")]
+    public float selectionOffsetY = 0.0f; 
+    public float selectionOffsetX = 0.0f;
+    public Vector2Int indexCorrection = Vector2Int.zero;
 
-    [Header("Dimensions Map")]
+    [Header("Bâtiments & Map")]
+    public GameObject tilePrefab;
+    public List<GameObject> buildingPrefabs; 
     public float anchorWidthMeters = 0.165f;
     public float gridWidthMeters = 1.01f;
     public float gridHeightMeters = 0.65f;
     public float gridLift = 0.0015f;
     public float depthOffset = -0.002f;
 
+    [Header("Composants AR")]
+    public ARTrackedImageManager imageManager;
+    public ARRaycastManager raycastManager;
+    public ARPlaneManager planeManager;
+
+    // Variables internes
     private UdpClient udpClient;
     private ARAnchor currentAnchor;
     private GameObject mapContainer;
@@ -39,17 +50,19 @@ public class UDP_generationMap : MonoBehaviour
     private string receivedData = "";
     private bool groundDetected = false;
 
-    // --- GESTION DE L'ABONNEMENT ---
-    void OnEnable() {
-        if (imageManager != null) imageManager.trackedImagesChanged += OnImageChanged;
-    }
+    // Variables Gameplay
+    private GameObject currentGhost;
+    private int currentBuildingIndex = -1;
+    private Vector2Int currentGridPos;
+    private bool isGhostActive = false;
 
-    void OnDisable() {
-        if (imageManager != null) imageManager.trackedImagesChanged -= OnImageChanged;
-    }
+    void OnEnable() { if (imageManager != null) imageManager.trackedImagesChanged += OnImageChanged; }
+    void OnDisable() { if (imageManager != null) imageManager.trackedImagesChanged -= OnImageChanged; }
 
     void Start() {
         if (finalCanvas != null) finalCanvas.SetActive(false);
+        if (itemMenuPanel != null) itemMenuPanel.SetActive(false);
+        if (validateButton != null) validateButton.SetActive(false);
         if (instructionText != null) instructionText.text = "Étape 1 : Scannez le sol...";
         
         try {
@@ -58,30 +71,22 @@ public class UDP_generationMap : MonoBehaviour
         } catch (Exception e) { Debug.LogError("Erreur UDP: " + e.Message); }
     }
 
-    // Cette fonction remplace le MapTrackingHandler
     void OnImageChanged(ARTrackedImagesChangedEventArgs args) {
-        foreach (var trackedImage in args.added) {
-            HandleQRCodeDetection(trackedImage);
-        }
-        foreach (var trackedImage in args.updated) {
-            HandleQRCodeDetection(trackedImage);
-        }
+        foreach (var img in args.added) HandleQRCodeDetection(img);
+        foreach (var img in args.updated) HandleQRCodeDetection(img);
     }
 
     void HandleQRCodeDetection(ARTrackedImage trackedImage) {
         if (isMapped || trackedImage.trackingState != TrackingState.Tracking) return;
 
-        // Désactivation du sol (Nettoyage)
         DisableARPlanes();
 
-        // Calcul position sol
         float finalY = trackedImage.transform.position.y;
         var hits = new List<ARRaycastHit>();
         if (raycastManager.Raycast(new Ray(trackedImage.transform.position + Vector3.up, Vector3.down), hits, TrackableType.PlaneWithinPolygon)) {
             finalY = hits[0].pose.position.y;
         }
 
-        // Création ancre
         GameObject anchorObj = new GameObject("Anchor_Map");
         anchorObj.transform.position = new Vector3(trackedImage.transform.position.x, finalY, trackedImage.transform.position.z);
         Vector3 forward = Vector3.ProjectOnPlane(trackedImage.transform.forward, Vector3.up).normalized;
@@ -105,7 +110,116 @@ public class UDP_generationMap : MonoBehaviour
             SpawnMap(receivedData);
             receivedData = "";
         }
+
+        if (isMapped && isGhostActive && currentGhost != null)
+        {
+            UpdateGhostPosition();
+        }
     }
+
+    void UpdateGhostPosition()
+    {
+        Ray ray = Camera.main.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+        Plane mapPlane = new Plane(mapContainer.transform.forward, mapContainer.transform.position + mapContainer.transform.forward * gridLift);
+
+        if (mapPlane.Raycast(ray, out float enter))
+        {
+            Vector3 worldHit = ray.GetPoint(enter);
+            Vector3 localHit = mapContainer.transform.InverseTransformPoint(worldHit);
+
+            float tX = gridWidthMeters / 15f;
+            float tY = gridHeightMeters / 10f;
+            
+            float xZero = (anchorWidthMeters / 2f);
+            float yZero = -(gridHeightMeters / 2f) + depthOffset;
+
+            float relativeX = localHit.x - xZero + selectionOffsetX;
+            float relativeY = localHit.y - yZero + selectionOffsetY;
+
+            int c = Mathf.RoundToInt((relativeX / tX) - 0.5f);
+            int r = Mathf.RoundToInt((relativeY / tY) - 0.5f);
+
+            c += indexCorrection.x;
+            r += indexCorrection.y;
+
+            if (c >= 0 && c < 15 && r >= 0 && r < 10)
+            {
+                currentGridPos = new Vector2Int(c, r);
+
+                float xCenter = xZero + (c * tX) + (tX / 2f);
+                float yCenter = yZero + (r * tY) + (tY / 2f);
+
+                Vector3 snappedLocalPos = new Vector3(xCenter, yCenter, gridLift);
+                currentGhost.transform.localPosition = snappedLocalPos;
+                
+                if (!currentGhost.activeSelf) currentGhost.SetActive(true);
+            }
+            else
+            {
+                if (currentGhost.activeSelf) currentGhost.SetActive(false);
+            }
+        }
+    }
+
+    public void SelectBuilding(int index)
+    {
+        if (currentGhost != null) Destroy(currentGhost);
+
+        if (index >= 0 && index < buildingPrefabs.Count)
+        {
+            currentBuildingIndex = index;
+            currentGhost = Instantiate(buildingPrefabs[index], mapContainer.transform);
+            
+            Collider[] colliders = currentGhost.GetComponentsInChildren<Collider>();
+            foreach(var col in colliders) Destroy(col);
+
+            isGhostActive = true;
+            
+            CloseItemMenu();
+            if (validateButton != null) validateButton.SetActive(true);
+            if (feedbackText != null) feedbackText.text = "Positionnez le bâtiment...";
+        }
+    }
+
+    public void OnValidatePlacement()
+    {
+        if (!isGhostActive || currentGhost == null || currentBuildingIndex == -1)
+        {
+            Debug.LogWarning("Placement invalide.");
+            return;
+        }
+
+        // Placement visuel définitif
+        GameObject finalBuilding = Instantiate(buildingPrefabs[currentBuildingIndex], mapContainer.transform);
+        finalBuilding.transform.position = currentGhost.transform.position;
+        finalBuilding.transform.rotation = currentGhost.transform.rotation;
+        finalBuilding.transform.localScale = currentGhost.transform.localScale;
+
+        // --- CORRECTION DU CALCUL D'INDEX ---
+        // Problème précédent : Mobile(4,0) envoyait un index qui donnait PC(14,4).
+        // Solution : Inverser la logique pour compenser l'interprétation du PC.
+        // Formule déduite : (14 - Col) * 10 + Row
+        // Exemple : Pour (4,0) -> (14 - 4) * 10 + 0 = 100.
+        // Si le PC reçoit 100, il décode (4, 0).
+        int indexToSend = (14 - currentGridPos.x) * 10 + currentGridPos.y;
+
+        int serverBuildingID = currentBuildingIndex + 5; 
+        
+        string command = $"BUILD,{indexToSend},{serverBuildingID}";
+        SendData(command);
+
+        if(feedbackText != null)
+            feedbackText.text = $"Bâtiment {serverBuildingID} placé en ({currentGridPos.x}, {currentGridPos.y})";
+
+        Destroy(currentGhost);
+        isGhostActive = false;
+        currentGhost = null;
+        
+        if (validateButton != null) validateButton.SetActive(false);
+    }
+
+    public void OpenItemMenu() { if (itemMenuPanel != null) itemMenuPanel.SetActive(true); }
+    public void CloseItemMenu() { if (itemMenuPanel != null) itemMenuPanel.SetActive(false); }
 
     void DisableARPlanes() {
         if (planeManager == null) return;
@@ -113,7 +227,6 @@ public class UDP_generationMap : MonoBehaviour
         foreach (var plane in planeManager.trackables) plane.gameObject.SetActive(false);
     }
 
-    // ... (SpawnMap, SendData, OnReceiveUDP, ApplyColor restent pareils)
     void SpawnMap(string data) {
         if (instructionText != null) instructionText.gameObject.SetActive(false);
         if (finalCanvas != null) finalCanvas.SetActive(true);
@@ -123,9 +236,11 @@ public class UDP_generationMap : MonoBehaviour
         float xStart = anchorWidthMeters / 2f; float yHalf = gridHeightMeters / 2f;
 
         for (int i = 0; i < values.Length; i++) {
-            int type = int.Parse(values[i]);
-            if (type == 0) continue;
+            if (!int.TryParse(values[i], out int type) || type == 0) continue;
+            
             int r = i / 15; int c = i % 15;
+            
+            // Calcul de position standard pour l'affichage initial
             Vector3 localPos = new Vector3(xStart + (c * tX) + (tX / 2f), (r * tY) - yHalf + (tY / 2f) + depthOffset, gridLift);
             GameObject tile = Instantiate(tilePrefab, mapContainer.transform);
             tile.transform.localPosition = localPos;
@@ -135,8 +250,10 @@ public class UDP_generationMap : MonoBehaviour
     }
 
     void SendData(string msg) {
-        byte[] data = Encoding.UTF8.GetBytes(msg);
-        udpClient.Send(data, data.Length, pythonIP, pythonPort);
+        try {
+            byte[] data = Encoding.UTF8.GetBytes(msg);
+            udpClient.Send(data, data.Length, pythonIP, pythonPort);
+        } catch (Exception e) { Debug.LogError("Send UDP Error: " + e.Message); }
     }
 
     private void OnReceiveUDP(IAsyncResult ar) {
@@ -150,14 +267,11 @@ public class UDP_generationMap : MonoBehaviour
 
     void ApplyColor(GameObject tile, int type) {
         Color col = type switch {
-            1 => new Color(0.45f, 0.85f, 0.45f), // Plaine
-            2 => new Color(0.5f, 0.5f, 0.5f),    // Montagne
-            3 => new Color(0.15f, 0.55f, 0.15f), // Forêt
-            4 => new Color(0.25f, 0.45f, 0.95f), // Rivière
-            _ => Color.white
+            1 => new Color(0.45f, 0.85f, 0.45f), 2 => new Color(0.5f, 0.5f, 0.5f),
+            3 => new Color(0.15f, 0.55f, 0.15f), 4 => new Color(0.25f, 0.45f, 0.95f), _ => Color.white
         };
         tile.GetComponent<Renderer>().material.color = col;
     }
-
+    
     private void OnDestroy() { if (udpClient != null) udpClient.Close(); }
 }
