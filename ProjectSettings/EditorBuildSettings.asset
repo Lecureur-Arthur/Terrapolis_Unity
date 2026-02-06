@@ -5,7 +5,7 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/VersionAR/GamePlayAR.unity
     guid: 7f32edf728957bc428e66b0352989645
   - enabled: 1

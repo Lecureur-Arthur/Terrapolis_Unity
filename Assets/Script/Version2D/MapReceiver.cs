@@ -53,7 +53,9 @@ public class MapReceiver : MonoBehaviour
             new Color(1f, 0.6f, 0f)         // 10: Residence (Orange)
         };
 
-        // Récupération des boutons de la grille (assurez-vous qu'ils sont dans l'ordre)
+        // Récupération des boutons de la grille
+        // ATTENTION : Si votre bouton IA est un enfant de cet objet, il sera compté ici.
+        // Assurez-vous que le bouton IA est en dehors du Panel de la grille dans la hiérarchie.
         gridButtons = GetComponentsInChildren<Button>();
 
         currentTileTypes = new int[gridButtons.Length];
@@ -90,6 +92,24 @@ public class MapReceiver : MonoBehaviour
         {
             // C'est vide -> On ouvre le menu Construire
             if (buildPopup != null) buildPopup.SetActive(true);
+        }
+    }
+
+    // --- FONCTION PUBLIQUE POUR LE BOUTON IA ---
+    public void AskAI()
+    {
+        // On définit un mot-clé simple que le Python va reconnaître
+        string message = "IA_TRIGGER"; 
+        
+        // On convertit en bytes
+        byte[] data = Encoding.UTF8.GetBytes(message);
+        
+        // On envoie au serveur Python (PC)
+        // Assure-toi que 'client' et 'serverEndPoint' sont bien initialisés (ce qui semble être le cas si le BUILD fonctionne)
+        if (client != null && serverEndPoint != null)
+        {
+            client.Send(data, data.Length, serverEndPoint);
+            Debug.Log("Signal IA envoyé au PC !");
         }
     }
 
@@ -189,6 +209,7 @@ public class MapReceiver : MonoBehaviour
         {
             try
             {
+                if (client == null) return;
                 IPEndPoint anyIP = new IPEndPoint(IPAddress.Any, 0);
                 byte[] data = client.Receive(ref anyIP);
                 string text = Encoding.UTF8.GetString(data);
@@ -208,7 +229,6 @@ public class MapReceiver : MonoBehaviour
             }
             catch (System.Exception e) 
             { 
-                // Ignorer les erreurs de fermeture de socket
                 if(isRunning) Debug.LogWarning("Erreur Réseau: " + e.Message);
             }
         }
@@ -226,9 +246,9 @@ public class MapReceiver : MonoBehaviour
     // --- TRAITEMENT DES MESSAGES ---
     void ProcessMessage(string message)
     {
-        // 1. POPUP
-        // Format Python : POPUP,TYPE,TITRE,MESSAGE (avec | pour les sauts de ligne)
-        if (message.StartsWith("POPUP"))
+        // 1. POPUP ou INFO
+        // Le Python envoie "INFO,CONFIRM,..." on gère les deux cas
+        if (message.StartsWith("POPUP") || message.StartsWith("INFO"))
         {
             string[] parts = message.Split(',');
             if(parts.Length >= 4)
@@ -236,10 +256,10 @@ public class MapReceiver : MonoBehaviour
                 string type = parts[1]; // ERROR ou CONFIRM
                 string title = parts[2];
                 
-                // On recolle le reste du message (au cas où il y aurait des virgules dans le texte)
+                // On recolle le reste du message
                 string rawBody = string.Join(",", parts, 3, parts.Length - 3);
                 
-                // IMPORTANT : Remplacer les '|' par des vrais sauts de ligne '\n'
+                // Remplacer les '|' par des vrais sauts de ligne '\n'
                 string cleanBody = rawBody.Replace("|", "\n");
 
                 ShowInfo(type, title, cleanBody);
@@ -264,9 +284,10 @@ public class MapReceiver : MonoBehaviour
 
         for (int i = 0; i < limit; i++)
         {
+            // Éviter de changer la couleur si par hasard le bouton IA est dans la liste
+            // Mais normalement il ne devrait pas l'être si vous l'avez mis hors hiérarchie
             if (int.TryParse(values[i], out int type))
             {
-                // --- NOUVEAU : On sauvegarde le type pour le clic futur ---
                 currentTileTypes[i] = type;
                 
                 if (type == 99) 
