@@ -12,7 +12,7 @@ using UnityEngine.EventSystems;
 public class UDP_generationMap : MonoBehaviour
 {
     [Header("Réseau UDP")]
-    public string pythonIP = "172.20.10.5"; 
+    public string pythonIP = "192.168.1.72"; 
     public int pythonPort = 5005;
     public int unityPort = 5006;
 
@@ -203,6 +203,14 @@ public class UDP_generationMap : MonoBehaviour
             if (validateButton != null) validateButton.SetActive(true);
             if (feedbackText != null) feedbackText.text = "Positionnez le bâtiment...";
         }
+    }
+
+    public void AskAI()
+    {
+        // On définit un mot-clé simple que le Python va reconnaître
+        string message = "IA_TRIGGER"; 
+
+        SendData(message);
     }
 
     public void OnValidatePlacement()
