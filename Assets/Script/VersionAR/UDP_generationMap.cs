@@ -2,7 +2,7 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Collections.Generic;
+using System.Collections.Generic; // Important pour Queue
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
@@ -42,12 +42,15 @@ public class UDP_generationMap : MonoBehaviour
     public ARRaycastManager raycastManager;
     public ARPlaneManager planeManager;
 
+    // --- SYSTEME DE FILE D'ATTENTE (Pour éviter les conflits RESULT / MAP) ---
+    private Queue<string> packetQueue = new Queue<string>();
+    private object queueLock = new object();
+
     // Variables internes
     private UdpClient udpClient;
     private ARAnchor currentAnchor;
     private GameObject mapContainer;
     private bool isMapped = false;
-    private string receivedData = "";
     private bool groundDetected = false;
 
     // Variables Gameplay
@@ -106,15 +109,36 @@ public class UDP_generationMap : MonoBehaviour
             instructionText.text = "Sol détecté ! Étape 2 : Scannez le QR Code.";
         }
 
-        if (!string.IsNullOrEmpty(receivedData)) {
-            SpawnMap(receivedData);
-            receivedData = "";
+        // --- TRAITEMENT DE la File d'Attente (Queue) ---
+        // On traite les messages reçus un par un dans l'ordre
+        lock (queueLock)
+        {
+            while (packetQueue.Count > 0)
+            {
+                string msg = packetQueue.Dequeue();
+                ProcessMessage(msg);
+            }
         }
 
         if (isMapped && isGhostActive && currentGhost != null)
         {
             UpdateGhostPosition();
         }
+    }
+
+    // NOUVELLE FONCTION : Trie les messages (RESULT vs MAP)
+    void ProcessMessage(string msg)
+    {
+        // 1. Ignorer ou Afficher les messages de confirmation "RESULT"
+        if (msg.StartsWith("RESULT"))
+        {
+            if (feedbackText != null) 
+                feedbackText.text = msg.Contains("OK") ? "Construction validée !" : "Erreur construction !";
+            return; // ON ARRÊTE LA, on ne lance pas SpawnMap avec ça !
+        }
+
+        // 2. Si c'est probablement une map (contient des chiffres et virgules)
+        SpawnMap(msg);
     }
 
     void UpdateGhostPosition()
@@ -189,27 +213,22 @@ public class UDP_generationMap : MonoBehaviour
             return;
         }
 
-        // Placement visuel définitif
+        // Placement visuel définitif (Client Side)
         GameObject finalBuilding = Instantiate(buildingPrefabs[currentBuildingIndex], mapContainer.transform);
         finalBuilding.transform.position = currentGhost.transform.position;
         finalBuilding.transform.rotation = currentGhost.transform.rotation;
         finalBuilding.transform.localScale = currentGhost.transform.localScale;
 
-        // --- CORRECTION DU CALCUL D'INDEX ---
-        // Problème précédent : Mobile(4,0) envoyait un index qui donnait PC(14,4).
-        // Solution : Inverser la logique pour compenser l'interprétation du PC.
-        // Formule déduite : (14 - Col) * 10 + Row
-        // Exemple : Pour (4,0) -> (14 - 4) * 10 + 0 = 100.
-        // Si le PC reçoit 100, il décode (4, 0).
+        // CALCUL INDEX (Ton calcul initial)
         int indexToSend = (14 - currentGridPos.x) * 10 + currentGridPos.y;
 
         int serverBuildingID = currentBuildingIndex + 5; 
         
-        string command = $"BUILD,{indexToSend},{serverBuildingID}";
+        string command = $"AR,{indexToSend},{serverBuildingID}";
         SendData(command);
 
         if(feedbackText != null)
-            feedbackText.text = $"Bâtiment {serverBuildingID} placé en ({currentGridPos.x}, {currentGridPos.y})";
+            feedbackText.text = "Envoi...";
 
         Destroy(currentGhost);
         isGhostActive = false;
@@ -228,24 +247,71 @@ public class UDP_generationMap : MonoBehaviour
     }
 
     void SpawnMap(string data) {
+        Debug.Log(data);
+        
+        // --- SECURITE CRITIQUE : Nettoyage des données ---
+        // On enlève les crochets python [], les espaces et les sauts de ligne
+        string cleanData = data.Replace("[", "").Replace("]", "").Replace("\n", "").Replace("\r", "").Replace(" ", "").Replace("|", "");
+        
+        // On découpe
+        string[] values = cleanData.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+        // --- VERIFICATION : EST-CE VRAIMENT UNE CARTE ? ---
+        // Si on a reçu un petit message d'erreur ou "RESULT,OK", values.Length sera petit (ex: 2).
+        // Une carte fait 15x10 = 150 cases. On prend une marge de sécurité (ex: > 140).
+        if (values.Length < 140) 
+        {
+            // Ce n'est pas une carte valide, on ignore pour ne pas casser l'affichage actuel
+            return; 
+        }
+
+        // SI ON ARRIVE ICI : C'est une vraie carte valide. On peut redessiner.
+        
         if (instructionText != null) instructionText.gameObject.SetActive(false);
         if (finalCanvas != null) finalCanvas.SetActive(true);
 
-        string[] values = data.Split(',');
-        float tX = gridWidthMeters / 15f; float tY = gridHeightMeters / 10f;
-        float xStart = anchorWidthMeters / 2f; float yHalf = gridHeightMeters / 2f;
+        // Nettoyage de l'ancienne carte
+        foreach (Transform child in mapContainer.transform) {
+            Destroy(child.gameObject);
+        }
 
+        float tX = gridWidthMeters / 15f; 
+        float tY = gridHeightMeters / 10f;
+        float xStart = anchorWidthMeters / 2f; 
+        float yHalf = gridHeightMeters / 2f;
+
+        // Boucle d'affichage (Ta logique conservée)
         for (int i = 0; i < values.Length; i++) {
             if (!int.TryParse(values[i], out int type) || type == 0) continue;
             
-            int r = i / 15; int c = i % 15;
+            int r = i / 15; 
+            int c = i % 15;
             
-            // Calcul de position standard pour l'affichage initial
             Vector3 localPos = new Vector3(xStart + (c * tX) + (tX / 2f), (r * tY) - yHalf + (tY / 2f) + depthOffset, gridLift);
-            GameObject tile = Instantiate(tilePrefab, mapContainer.transform);
-            tile.transform.localPosition = localPos;
-            tile.transform.localScale = new Vector3(tX * 0.95f, tY * 0.95f, 0.005f);
-            ApplyColor(tile, type);
+            
+            // Logique Bâtiment 3D vs Terrain
+            if (type >= 5)
+            {
+                int prefabIndex = type - 5; 
+                if (prefabIndex >= 0 && prefabIndex < buildingPrefabs.Count)
+                {
+                    GameObject building = Instantiate(buildingPrefabs[prefabIndex], mapContainer.transform);
+                    building.transform.localPosition = localPos;
+                }
+                
+                // Sol sous le bâtiment
+                GameObject floor = Instantiate(tilePrefab, mapContainer.transform);
+                floor.transform.localPosition = localPos;
+                floor.transform.localScale = new Vector3(tX * 0.95f, tY * 0.95f, 0.005f);
+                ApplyColor(floor, 1); 
+            }
+            else
+            {
+                GameObject tile = Instantiate(tilePrefab, mapContainer.transform);
+                tile.transform.localPosition = localPos;
+                tile.transform.localScale = new Vector3(tX * 0.95f, tY * 0.95f, 0.005f);
+                ApplyColor(tile, type);
+            }
         }
     }
 
@@ -260,15 +326,26 @@ public class UDP_generationMap : MonoBehaviour
         try {
             IPEndPoint ip = new IPEndPoint(IPAddress.Any, unityPort);
             byte[] bytes = udpClient.EndReceive(ar, ref ip);
-            receivedData = Encoding.UTF8.GetString(bytes);
+            string msg = Encoding.UTF8.GetString(bytes);
+
+            // ON STOCKE DANS LA FILE D'ATTENTE (Thread Safe)
+            lock(queueLock)
+            {
+                packetQueue.Enqueue(msg);
+                Debug.Log(msg);
+            }
+
             udpClient.BeginReceive(new AsyncCallback(OnReceiveUDP), null);
         } catch {}
     }
 
     void ApplyColor(GameObject tile, int type) {
         Color col = type switch {
-            1 => new Color(0.45f, 0.85f, 0.45f), 2 => new Color(0.5f, 0.5f, 0.5f),
-            3 => new Color(0.15f, 0.55f, 0.15f), 4 => new Color(0.25f, 0.45f, 0.95f), _ => Color.white
+            1 => new Color(0.45f, 0.85f, 0.45f), 
+            2 => new Color(0.5f, 0.5f, 0.5f),
+            3 => new Color(0.15f, 0.55f, 0.15f), 
+            4 => new Color(0.25f, 0.45f, 0.95f), 
+            _ => Color.white
         };
         tile.GetComponent<Renderer>().material.color = col;
     }

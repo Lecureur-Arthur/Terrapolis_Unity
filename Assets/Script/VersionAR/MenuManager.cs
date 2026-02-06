@@ -19,4 +19,14 @@ public class MenuManager : MonoBehaviour
     {
         SceneManager.LoadScene("VisualizationPrefab3D");
     }
+
+    public void AccesPlacement2D ()
+    {
+        SceneManager.LoadScene("GamePlay2D");
+    }
+
+    public void AccesPlacement3D ()
+    {
+        SceneManager.LoadScene("GamePlayAR");
+    }
 }
