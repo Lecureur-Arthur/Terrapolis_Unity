@@ -12,7 +12,7 @@ using UnityEngine.EventSystems;
 public class UDP_generationMap : MonoBehaviour
 {
     [Header("Réseau UDP")]
-    public string pythonIP = "192.168.1.72"; 
+    public string pythonIP = "10.110.215.104"; 
     public int pythonPort = 5005;
     public int unityPort = 5006;
 
