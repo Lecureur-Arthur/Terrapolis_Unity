@@ -81,13 +81,13 @@ Scène de visualisation d'objets.
 
 Pour que le mobile puisse discuter avec le script Python, vous devez configurer les IPs.
 
-### 1️. Côté Python (PC)
+### 1. Côté Python (PC)
 
 1. Lancez votre terminal et faites `ipconfig` (Win).
 2. Notez votre **Adresse IPv4** (C'est l'adresse du serveur).
 3. Lancez le script Python.
 
-### 2️. Côté Unity (Scène "GamePlayAR")
+### 2. Côté Unity (Scène "GamePlayAR")
 
 L'application doit savoir où envoyer la requête de map.
 
