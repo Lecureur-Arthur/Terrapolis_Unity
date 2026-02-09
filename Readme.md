@@ -133,9 +133,3 @@ L'application doit savoir sur quel port écouter la réponse.
 * LECUREUR Arthur
 * TOURNAY Clara
 * PLATET Thibaut
-
----
-
-### C'est bon pour toi ?
-
-Si tu veux, je peux aussi rédiger rapidement le `README.md` pour le **côté Python** afin qu'il corresponde parfaitement à celui-ci (en mentionnant qu'il faut donner l'IP au client Unity).
